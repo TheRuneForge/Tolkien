@@ -22,6 +22,17 @@ cargo test
 
 The initial executable prints the application name and version. This is a starting point for the document-processing pipeline, not a functional document reader yet.
 
+## Documentation
+
+The project documentation is built with [Zensical](https://zensical.org/).
+
+```sh
+python -m pip install -r requirements-docs.txt
+zensical serve
+```
+
+The documentation site can be built locally with `zensical build --clean`. Changes to documentation are built in CI and deployed to GitHub Pages from `main`.
+
 ## Development principles
 
 - Adapt processing and presentation to the characteristics detected in each document.
@@ -30,6 +41,8 @@ The initial executable prints the application name and version. This is a starti
 - Make detection evidence and uncertainty inspectable.
 - Provide explicit user overrides and safe recovery paths.
 - Add support incrementally, validating each document variant end to end.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks and commit conventions.
 
 ## License
 

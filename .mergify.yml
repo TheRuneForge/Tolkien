@@ -1,0 +1,94 @@
+
+pull_request_rules:
+  - name: Label feature pull requests
+    conditions:
+      - 'title ~= ^feat(\(.+\))?!?:'
+    actions:
+      label:
+        add:
+          - "type: feature"
+
+  - name: Label bug fixes
+    conditions:
+      - 'title ~= ^fix(\(.+\))?!?:'
+    actions:
+      label:
+        add:
+          - "type: bug"
+
+  - name: Label documentation changes
+    conditions:
+      - 'title ~= ^docs(\(.+\))?:'
+    actions:
+      label:
+        add:
+          - "type: documentation"
+
+  - name: Label maintenance changes
+    conditions:
+      - 'title ~= ^(chore|ci|build|refactor|test)(\(.+\))?!?:'
+    actions:
+      label:
+        add:
+          - "type: maintenance"
+
+  - name: Label dependency updates
+    conditions:
+      - or:
+          - author = renovate[bot]
+          - author = dependabot[bot]
+    actions:
+      label:
+        add:
+          - dependencies
+
+merge_protections_settings:
+  auto_merge_conditions: true
+  post_comment: true
+  reporting_method: check-runs
+
+merge_protections:
+  - name: Rust quality checks
+    description: Require the complete Rust CI workflow to pass.
+    if:
+      - base = main
+    success_conditions:
+      - 'check-success = @github-actions/Format, lint, test, and build'
+
+  - name: Documentation checks
+    description: Require documentation CI when documentation files change.
+    if:
+      - base = main
+      - 'files ~= ^(docs/|zensical\.toml$|requirements-docs\.txt$|\.github/workflows/docs\.yml$)'
+    success_conditions:
+      - 'check-success = @github-actions/Build documentation'
+
+  - name: Security analysis
+    description: Require Semgrep security analysis.
+    if:
+      - base = main
+    success_conditions:
+      - 'check-success = @semgrep-code-theruneforge/semgrep-cloud-platform/scan'
+
+  - name: Automated code review
+    description: Require CodeRabbit review to complete successfully.
+    if:
+      - base = main
+    success_conditions:
+      - 'check-success = @coderabbitai/CodeRabbit'
+
+queue_rules:
+  - name: default
+    queue_conditions:
+      - base = main
+    merge_conditions: []
+    merge_method: squash
+    batch_size: 1
+
+merge_queue:
+  mode: serial
+  max_parallel_checks: 1
+  queue_controls_comment: true
+  queued_label: mergify/queued
+  checking_label: mergify/checking
+  dequeued_label: mergify/dequeued

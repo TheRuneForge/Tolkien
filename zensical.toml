@@ -1,0 +1,6 @@
+[project]
+site_name = "Tolkien"
+site_description = "Adaptive, modular document interpretation and rendering engine"
+site_url = "https://theruneforge.github.io/Tolkien/"
+repo_url = "https://github.com/TheRuneForge/Tolkien"
+repo_name = "TheRuneForge/Tolkien"
