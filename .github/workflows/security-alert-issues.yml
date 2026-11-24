@@ -78,7 +78,7 @@ jobs:
                   results.extend(batch)
 
                   link_header = headers.get("Link", "")
-                  next_match = re.search(r'<([^>]+)>;\\s*rel="next"', link_header)
+                  next_match = re.search(r'<([^>]+)>;\s*rel="next"', link_header)
                   next_url = next_match.group(1) if next_match else None
                   if next_url:
                       parsed = urllib.parse.urlparse(next_url)
