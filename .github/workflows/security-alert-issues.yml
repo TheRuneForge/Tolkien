@@ -1,0 +1,230 @@
+name: Security alert issues
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: security-alert-issues
+  cancel-in-progress: false
+
+jobs:
+  sync-alerts:
+    name: Create issues from open security alerts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Create or reopen alert issues
+        env:
+          ALERTS_TOKEN: ${{ secrets.SECURITY_ALERTS_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          API = "https://api.github.com"
+          TOKEN = os.environ["ALERTS_TOKEN"]
+          REPOSITORY = os.environ["GH_REPOSITORY"]
+
+          if not TOKEN:
+              sys.exit("Missing required secret: SECURITY_ALERTS_TOKEN")
+
+          def request(method, path, payload=None):
+              url = API + path
+              data = None if payload is None else json.dumps(payload).encode()
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method=method,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {TOKEN}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      raw = response.read()
+                      return json.loads(raw) if raw else None
+              except urllib.error.HTTPError as error:
+                  detail = error.read().decode("utf-8", "replace")
+                  raise RuntimeError(f"GitHub API {method} {path}: HTTP {error.code}: {detail}") from error
+
+          def get_all(path):
+              results = []
+              page = 1
+              while True:
+                  separator = "&" if "?" in path else "?"
+                  batch = request("GET", f"{path}{separator}per_page=100&page={page}")
+                  if not isinstance(batch, list):
+                      raise RuntimeError(f"Expected a list from {path}")
+                  results.extend(batch)
+                  if len(batch) < 100:
+                      return results
+                  page += 1
+
+          def severity_label(value, fallback="unknown"):
+              value = (value or "").lower()
+              return value if value in {"critical", "high", "medium", "low"} else fallback
+
+          def code_scanning_severity(alert):
+              rule = alert.get("rule") or {}
+              level = (rule.get("security_severity_level") or "").lower()
+              if level in {"critical", "high", "medium", "low"}:
+                  return level
+              return {
+                  "error": "high",
+                  "warning": "medium",
+                  "note": "low",
+              }.get((rule.get("severity") or "").lower(), "unknown")
+
+          def make_alert(kind, alert):
+              number = alert["number"]
+              if kind == "dependabot":
+                  dependency = alert.get("dependency") or {}
+                  package = dependency.get("package") or {}
+                  vulnerability = alert.get("security_vulnerability") or {}
+                  advisory = alert.get("security_advisory") or {}
+                  severity = severity_label(vulnerability.get("severity") or advisory.get("severity"))
+                  name = package.get("name") or "Unknown dependency"
+                  ecosystem = package.get("ecosystem") or "unknown ecosystem"
+                  title = f"[{severity.upper()}] Dependency vulnerability: {name}"
+                  details = [
+                      f"- **Package:** {name} ({ecosystem})",
+                      f"- **Manifest:** {dependency.get('manifest_path') or 'Not provided'}",
+                      f"- **Affected versions:** {vulnerability.get('vulnerable_version_range') or 'Not provided'}",
+                      f"- **GHSA:** {advisory.get('ghsa_id') or 'Not provided'}",
+                  ]
+                  label_type = "type:dependency-vulnerability"
+                  url = alert.get("html_url") or ""
+                  summary = advisory.get("summary") or "Dependabot reported a vulnerable dependency."
+              elif kind == "code-scanning":
+                  rule = alert.get("rule") or {}
+                  instance = alert.get("most_recent_instance") or {}
+                  location = instance.get("location") or {}
+                  severity = code_scanning_severity(alert)
+                  rule_name = rule.get("description") or rule.get("name") or "Code scanning finding"
+                  title = f"[{severity.upper()}] Code scanning: {rule_name}"
+                  line = location.get("start_line")
+                  path = location.get("path") or "Not provided"
+                  details = [
+                      f"- **Rule:** {rule.get('id') or 'Not provided'}",
+                      f"- **Tool:** {(alert.get('tool') or {}).get('name') or 'Not provided'}",
+                      f"- **Location:** {path}" + (f":{line}" if line else ""),
+                      f"- **Security severity:** {(rule.get('security_severity_level') or 'Not provided')}",
+                  ]
+                  label_type = "type:code-scanning"
+                  url = alert.get("html_url") or ""
+                  summary = rule.get("description") or "Code scanning reported a finding."
+              else:
+                  secret_type = alert.get("secret_type_display_name") or alert.get("secret_type") or "secret"
+                  validity = (alert.get("validity") or "unknown").lower()
+                  severity = "critical" if validity == "active" else ("low" if validity == "inactive" else "high")
+                  title = f"[{severity.upper()}] Exposed secret: {secret_type}"
+                  details = [
+                      f"- **Secret type:** {secret_type}",
+                      f"- **Validity:** {validity}",
+                      f"- **Publicly leaked:** {alert.get('publicly_leaked', False)}",
+                      "- **Secret value:** deliberately omitted",
+                  ]
+                  label_type = "type:secret-exposure"
+                  url = alert.get("html_url") or ""
+                  summary = "Secret scanning detected a potential exposed secret. The secret value is intentionally not copied into this issue."
+
+              key = f"{kind}:{number}"
+              labels = ["security-alert", label_type, f"severity:{severity}"]
+              body = "\n".join([
+                  "<!-- security-alert-key: " + key + " -->",
+                  "## Security alert",
+                  "",
+                  summary,
+                  "",
+                  *details,
+                  "",
+                  f"- **Alert source:** {kind}",
+                  f"- **Alert number:** #{number}",
+                  f"- **Severity:** {severity}",
+                  f"- **GitHub alert:** {url or 'Link unavailable'}",
+                  "",
+                  "_This issue was created automatically from an open GitHub security alert._",
+              ])
+              return {"key": key, "title": title, "body": body, "labels": labels}
+
+          label_definitions = {
+              "security-alert": ("B60205", "Automatically created issue representing an open GitHub security alert."),
+              "type:dependency-vulnerability": ("D93F0B", "A vulnerable dependency reported by Dependabot."),
+              "type:code-scanning": ("5319E7", "A code security finding reported by code scanning, including CodeQL."),
+              "type:secret-exposure": ("B60205", "A potential exposed credential or secret reported by secret scanning."),
+              "severity:critical": ("B60205", "Critical severity security alert; address immediately."),
+              "severity:high": ("D93F0B", "High severity security alert; prioritize remediation."),
+              "severity:medium": ("FBCA04", "Medium severity security alert; remediate in normal priority order."),
+              "severity:low": ("0E8A16", "Low severity security alert; address when practical."),
+              "severity:unknown": ("C5DEF5", "The source did not provide a recognized severity level."),
+          }
+
+          # Labels are created in this repository if they do not already exist.
+          for name, (color, description) in label_definitions.items():
+              try:
+                  request("POST", f"/repos/{REPOSITORY}/labels", {
+                      "name": name, "color": color, "description": description
+                  })
+              except RuntimeError as error:
+                  if "HTTP 422" not in str(error):
+                      raise
+
+          alerts = []
+          endpoints = [
+              ("dependabot", f"/repos/{REPOSITORY}/dependabot/alerts?state=open"),
+              ("code-scanning", f"/repos/{REPOSITORY}/code-scanning/alerts?state=open"),
+              ("secret-scanning", f"/repos/{REPOSITORY}/secret-scanning/alerts?state=open&hide_secret=true"),
+          ]
+          for kind, endpoint in endpoints:
+              for alert in get_all(endpoint):
+                  alerts.append(make_alert(kind, alert))
+
+          existing = {}
+          for issue in get_all(f"/repos/{REPOSITORY}/issues?state=all"):
+              if "pull_request" in issue:
+                  continue
+              body = issue.get("body") or ""
+              marker = "<!-- security-alert-key: "
+              start = body.find(marker)
+              if start != -1:
+                  end = body.find(" -->", start)
+                  if end != -1:
+                      existing[body[start + len(marker):end]] = issue
+
+          created = reopened = unchanged = 0
+          for alert in alerts:
+              current = existing.get(alert["key"])
+              if current:
+                  if current.get("state") == "closed":
+                      request("PATCH", f"/repos/{REPOSITORY}/issues/{current['number']}", {"state": "open"})
+                      reopened += 1
+                      print(f"Reopened issue #{current['number']} for {alert['key']}")
+                  else:
+                      unchanged += 1
+                  continue
+
+              issue = request("POST", f"/repos/{REPOSITORY}/issues", {
+                  "title": alert["title"],
+                  "body": alert["body"],
+                  "labels": alert["labels"],
+              })
+              created += 1
+              print(f"Created issue #{issue['number']} for {alert['key']}")
+
+          print(
+              f"Security alert sync complete: {len(alerts)} open alerts, "
+              f"{created} issues created, {reopened} reopened, {unchanged} already tracked."
+          )
+          PY
