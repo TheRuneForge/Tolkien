@@ -27,6 +27,7 @@ jobs:
           python3 <<'PY'
           import json
           import os
+          import re
           import sys
           import urllib.error
           import urllib.parse
@@ -40,8 +41,8 @@ jobs:
           if not ALERTS_TOKEN:
               sys.exit("Missing required secret: SECURITY_ALERTS_TOKEN")
 
-          def request(method, path, payload=None, token=None):
-              url = API + path
+          def request_with_headers(method, path, payload=None, token=None):
+              url = path if path.startswith(API + "/") else API + path
               data = None if payload is None else json.dumps(payload).encode()
               req = urllib.request.Request(
                   url,
@@ -57,10 +58,34 @@ jobs:
               try:
                   with urllib.request.urlopen(req, timeout=30) as response:
                       raw = response.read()
-                      return json.loads(raw) if raw else None
+                      return (json.loads(raw) if raw else None), response.headers
               except urllib.error.HTTPError as error:
                   detail = error.read().decode("utf-8", "replace")
-                  raise RuntimeError(f"GitHub API {method} {path}: HTTP {error.code}: {detail}") from error
+                  raise RuntimeError(f"GitHub API {method} {url}: HTTP {error.code}: {detail}") from error
+
+          def request(method, path, payload=None, token=None):
+              data, _ = request_with_headers(method, path, payload, token)
+              return data
+
+          def get_all_cursor(path, token=None):
+              results = []
+              separator = "&" if "?" in path else "?"
+              url = f"{API}{path}{separator}per_page=100"
+              while url:
+                  batch, headers = request_with_headers("GET", url, token=token)
+                  if not isinstance(batch, list):
+                      raise RuntimeError(f"Expected a list from {url}")
+                  results.extend(batch)
+
+                  link_header = headers.get("Link", "")
+                  next_match = re.search(r'<([^>]+)>;\\s*rel="next"', link_header)
+                  next_url = next_match.group(1) if next_match else None
+                  if next_url:
+                      parsed = urllib.parse.urlparse(next_url)
+                      if parsed.scheme != "https" or parsed.netloc != "api.github.com":
+                          raise RuntimeError("GitHub returned an unexpected pagination URL")
+                  url = next_url
+              return results
 
           def get_all(path, token=None):
               results = []
@@ -185,18 +210,35 @@ jobs:
                       raise
 
           alerts = []
+          source_errors = []
           endpoints = [
-              ("dependabot", f"/repos/{REPOSITORY}/dependabot/alerts?state=open"),
-              ("code-scanning", f"/repos/{REPOSITORY}/code-scanning/alerts?state=open"),
-              ("secret-scanning", f"/repos/{REPOSITORY}/secret-scanning/alerts?state=open&hide_secret=true"),
+              ("dependabot", f"/repos/{REPOSITORY}/dependabot/alerts?state=open", get_all_cursor),
+              ("code-scanning", f"/repos/{REPOSITORY}/code-scanning/alerts?state=open", get_all),
+              ("secret-scanning", f"/repos/{REPOSITORY}/secret-scanning/alerts?state=open&hide_secret=true", get_all),
           ]
-          for kind, endpoint in endpoints:
-              for alert in get_all(endpoint, token=ALERTS_TOKEN):
-                  alerts.append(make_alert(kind, alert))
+          for kind, endpoint, collector in endpoints:
+              try:
+                  source_alerts = collector(endpoint, token=ALERTS_TOKEN)
+              except RuntimeError as error:
+                  source_errors.append((kind, str(error)))
+                  print(f"ERROR: Could not collect {kind} alerts: {error}", file=sys.stderr)
+                  continue
+              alerts.extend(make_alert(kind, alert) for alert in source_alerts)
+              print(f"Collected {len(source_alerts)} open {kind} alerts.")
 
           existing = {}
+          trusted_bot = "github-actions[bot]"
           for issue in get_all(f"/repos/{REPOSITORY}/issues?state=all"):
               if "pull_request" in issue:
+                  continue
+              if (issue.get("user") or {}).get("login") != trusted_bot:
+                  continue
+              labels = {
+                  label.get("name")
+                  for label in issue.get("labels", [])
+                  if isinstance(label, dict)
+              }
+              if "security-alert" not in labels:
                   continue
               body = issue.get("body") or ""
               marker = "<!-- security-alert-key: "
@@ -204,7 +246,9 @@ jobs:
               if start != -1:
                   end = body.find(" -->", start)
                   if end != -1:
-                      existing[body[start + len(marker):end]] = issue
+                      key = body[start + len(marker):end]
+                      if re.fullmatch(r"(?:dependabot|code-scanning|secret-scanning):[1-9][0-9]*", key):
+                          existing[key] = issue
 
           created = reopened = unchanged = 0
           for alert in alerts:
@@ -224,10 +268,14 @@ jobs:
                   "labels": alert["labels"],
               })
               created += 1
+              existing[alert["key"]] = issue
               print(f"Created issue #{issue['number']} for {alert['key']}")
 
           print(
-              f"Security alert sync complete: {len(alerts)} open alerts, "
+              f"Security alert sync complete: {len(alerts)} collected open alerts, "
               f"{created} issues created, {reopened} reopened, {unchanged} already tracked."
           )
+          if source_errors:
+              failed_sources = ", ".join(kind for kind, _ in source_errors)
+              sys.exit(f"Security alert collection incomplete; failed sources: {failed_sources}")
           PY
