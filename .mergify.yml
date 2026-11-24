@@ -53,7 +53,7 @@ merge_protections:
     if:
       - base = main
     success_conditions:
-      - 'check-success = @github-actions/Analyze (rust)'
+      - 'check-success = @github-actions/Format, lint, test, and build'
 
   - name: Documentation checks
     description: Require documentation CI when documentation files change.
