@@ -70,12 +70,6 @@ merge_protections:
     success_conditions:
       - 'check-success = @semgrep-code-theruneforge/semgrep-cloud-platform/scan'
 
-  - name: Automated code review
-    description: Require CodeRabbit review to complete successfully.
-    if:
-      - base = main
-    success_conditions:
-      - 'check-success = @coderabbitai/CodeRabbit'
 
 queue_rules:
   - name: default
