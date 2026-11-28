@@ -255,6 +255,25 @@ jobs:
                       if re.fullmatch(r"(?:dependabot|code-scanning|secret-scanning):[1-9][0-9]*", key):
                           existing[key] = issue
 
+          def code_owners():
+              try:
+                  data = request("GET", f"/repos/{REPOSITORY}/contents/.github/CODEOWNERS")
+              except RuntimeError:
+                  return []
+              import base64
+              text = base64.b64decode(data["content"]).decode("utf-8", "replace")
+              owners = []
+              for line in text.splitlines():
+                  line = line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  for token in line.split()[1:]:
+                      if re.fullmatch(r"@[A-Za-z0-9-]+", token) and token[1:] not in owners:
+                          owners.append(token[1:])
+              return owners
+
+          ASSIGNEES = code_owners()
+
           created = reopened = unchanged = 0
           for alert in alerts:
               current = existing.get(alert["key"])
@@ -271,6 +290,7 @@ jobs:
                   "title": alert["title"],
                   "body": alert["body"],
                   "labels": alert["labels"],
+                  "assignees": ASSIGNEES,
               })
               created += 1
               existing[alert["key"]] = issue
