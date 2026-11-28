@@ -1,0 +1,6 @@
+# cargo-nextest configuration.
+# The `ci` profile writes a JUnit report to target/nextest/ci/junit.xml,
+# which CI uploads to Mergify Test Engine.
+
+[profile.ci.junit]
+path = "junit.xml"
