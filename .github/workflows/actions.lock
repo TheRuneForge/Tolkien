@@ -19,7 +19,8 @@ workflows:
         - 'actions/labeler@v7.0.0'
     '.github/workflows/release-please.yml':
         - 'googleapis/release-please-action@v5.0.0'
-    '.github/workflows/security-alert-issues.yml': []
+    '.github/workflows/security-alert-issues.yml':
+        - 'actions/create-github-app-token@v3.4.0'
 dependencies:
     'actions/checkout@v7.0.1':
         ref: 'v7.0.1'
@@ -31,6 +32,11 @@ dependencies:
         commit: 'sha1-45bfe0192ca1faeb007ade9deae92b16b8254a0d'
         owner_id: 44036562
         repo_id: 513659658
+    'actions/create-github-app-token@v3.4.0':
+        ref: 'v3.4.0'
+        commit: 'sha1-f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc'
+        owner_id: 44036562
+        repo_id: 642580244
     'actions/deploy-pages@v5.0.1':
         ref: 'v5.0.1'
         commit: 'sha1-368f82528645a54fb793d4d04e342629a3f51346'
