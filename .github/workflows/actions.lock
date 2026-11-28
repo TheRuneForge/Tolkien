@@ -6,6 +6,7 @@ workflows:
     '.github/workflows/ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@stable'
+        - 'mergifyio/gha-mergify-ci@v30'
     '.github/workflows/docs.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/configure-pages@v6.0.0'
@@ -58,3 +59,21 @@ dependencies:
         commit: 'sha1-45996ed1f6d02564a971a2fa1b5860e934307cf7'
         owner_id: 16785467
         repo_id: 262236530
+    'mergifyio/gha-mergify-ci@v30':
+        ref: 'v30'
+        commit: 'sha1-2c07ded2622520933bc1f16ba49c9a626d6d90ac'
+        owner_id: 37838584
+        repo_id: 827022088
+        uses:
+            - 'mergifyio/setup-cli@4c0a3dd5939b5f8fb423b48d4e99cfab29f75e87'
+            - 're-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35'
+    'mergifyio/setup-cli@4c0a3dd5939b5f8fb423b48d4e99cfab29f75e87':
+        ref: 'v1.6.0'
+        commit: 'sha1-4c0a3dd5939b5f8fb423b48d4e99cfab29f75e87'
+        owner_id: 37838584
+        repo_id: 1267289500
+    're-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35':
+        ref: 'v1.3.0'
+        commit: 'sha1-b5b5b37504aa4183270bd3d855c52a67f212be35'
+        owner_id: 46427759
+        repo_id: 434447646
