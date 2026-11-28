@@ -24,9 +24,3 @@ ci:
           - '.mergify.yml'
           - 'release-please-config.json'
           - '.release-please-manifest.json'
-
-dependencies:
-  - changed-files:
-      - any-glob-to-any-file:
-          - 'Cargo.lock'
-          - 'renovate.json'
